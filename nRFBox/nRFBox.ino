@@ -6,37 +6,41 @@
 #include "icon.h"
 #include "setting.h"
 #include "config.h"
+#include "screensaver.h"
 
-extern uint8_t oledBrightness;
+U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, /* reset=*/ U8X8_PIN_NONE);
+Adafruit_NeoPixel pixels(1, 14, NEO_GRB + NEO_KHZ800);
+bool neoPixelActive = false;
+uint8_t oledBrightness = 100;
 
-const int NUM_ITEMS = 12;
+const int NUM_ITEMS = 13;
 const int MAX_ITEM_LENGTH = 20;
 
 const unsigned char* bitmap_icons[NUM_ITEMS] = {
   bitmap_icon_scanner, bitmap_icon_analyzer, bitmap_icon_jammer, bitmap_icon_kill,
   bitmap_icon_ble_jammer, bitmap_icon_spoofer, bitmap_icon_apple, bitmap_icon_ble,
   bitmap_icon_wifi, bitmap_icon_wifi_jammer, bitmap_icon_about, 
-  bitmap_icon_setting
+  bitmap_icon_setting, bitmap_icon_screensaver
 };
 
 char menu_items[NUM_ITEMS][MAX_ITEM_LENGTH] = {  
   "Scanner", "Analyzer", "WLAN Jammer", "Proto Kill", "BLE Jammer",
   "BLE Spoofer", "Sour Apple", "BLE Scan", "WiFi Scan", 
-  "Deauther", "About", "Setting"
+  "Deauther", "About", "Setting", "Screen Saver"
 };
 
 void (*menu_functions[NUM_ITEMS])() = {
   Scanner::scannerSetup, Analyzer::analyzerSetup, Jammer::jammerSetup,
   ProtoKill::blackoutSetup, BleJammer::blejammerSetup, Spoofer::spooferSetup,
   SourApple::sourappleSetup, BleScan::blescanSetup, WifiScan::wifiscanSetup, Deauther::deautherSetup,
-  utils, Setting::settingSetup
+  utils, Setting::settingSetup, ScreenSaver::screensaverSetup
 };
 
 void (*menu_loop_functions[NUM_ITEMS])() = {
   Scanner::scannerLoop, Analyzer::analyzerLoop, Jammer::jammerLoop,
   ProtoKill::blackoutLoop, BleJammer::blejammerLoop, Spoofer::spooferLoop,
   SourApple::sourappleLoop, BleScan::blescanLoop, WifiScan::wifiscanLoop, Deauther::deautherLoop,
-  nullptr, Setting::settingLoop
+  nullptr, Setting::settingLoop, ScreenSaver::screensaverLoop
 };
 
 int item_selected = 0;
@@ -48,6 +52,9 @@ const unsigned long POST_PRESS_DELAY = 200;
 void drawMenu() {
   u8g2.clearBuffer();
   if (current_screen != 0) return;
+
+  Serial.print("\n>>> Current Selection: ");
+  Serial.println(menu_items[item_selected]);
 
   u8g2.setFont(u8g2_font_5x7_tf); 
   u8g2.drawBox(0, 0, 128, 8); 
@@ -63,6 +70,15 @@ void drawMenu() {
   Str(2, 7, txt_n, sizeof(txt_n));
   int version_width = u8g2.getUTF8Width(versionStr);
   Str(128 - version_width - 2, 7, txt_v, sizeof(txt_v));
+  
+  char voidStr[16];
+  for (size_t i = 0; i < sizeof(txt_c); i++) {
+    voidStr[i] = (char)txt_c[i];
+  }
+  voidStr[sizeof(txt_c)] = '\0';
+  int void_width = u8g2.getUTF8Width(voidStr);
+  Str((128 - void_width) / 2, 7, txt_c, sizeof(txt_c));
+
   u8g2.setDrawColor(1); 
   u8g2.drawHLine(0, 8, 128); 
 
@@ -135,6 +151,11 @@ void setup() {
   initAllRadios();
   EEPROM.begin(512);
   oledBrightness = EEPROM.read(1);
+  bootSequenceSpeed = EEPROM.read(2);
+  screensaverType = EEPROM.read(3);
+  if (bootSequenceSpeed > 2) bootSequenceSpeed = 1; // Default to Normal
+  if (screensaverType > 1) screensaverType = 0; // Default to Cat
+  if (oledBrightness == 0 || oledBrightness > 255) oledBrightness = 25; // Default to ~10% if 0 or invalid
   u8g2.begin();
   u8g2.setContrast(oledBrightness);
   conf();
@@ -143,6 +164,7 @@ void setup() {
   pinMode(BUTTON_DOWN_PIN, INPUT_PULLUP);
   pinMode(BTN_PIN_RIGHT, INPUT_PULLUP);
   pinMode(BTN_PIN_LEFT, INPUT_PULLUP);
+  Serial.println("\n--- nRFBox Started ---");
   drawMenu();
 }
 
@@ -168,6 +190,9 @@ void loop() {
     }
     if (readButton(BUTTON_SELECT_PIN)) {
       current_screen = 1;
+      Serial.print("\n=== Entering: ");
+      Serial.print(menu_items[item_selected]);
+      Serial.println(" ===");
       for (int cycle = 0; cycle < 2; cycle++) { 
         for (int i = 0; i < 3; i++) {
           u8g2.clearBuffer();
@@ -195,6 +220,7 @@ void loop() {
         }
         if (readButton(BUTTON_SELECT_PIN)) {
           current_screen = 0;
+          Serial.println("\n=== Exiting to Main Menu ===");
           break;
         }
       }
